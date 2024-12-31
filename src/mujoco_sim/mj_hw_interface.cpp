@@ -28,7 +28,7 @@ MjHWInterface::MjHWInterface(const std::string &robot)
     joint_velocities.resize(num_joints, 0.);
     joint_efforts.resize(num_joints, 0.);
 
-    // joint_positions_command.resize(num_joints, 0.);
+    joint_positions_command.resize(num_joints, 0.);
     joint_velocities_command.resize(num_joints, 0.);
     joint_efforts_command.resize(num_joints, 0.);
 
@@ -37,8 +37,8 @@ MjHWInterface::MjHWInterface(const std::string &robot)
         hardware_interface::JointStateHandle joint_state_handle(joint_names[i], &joint_positions[i], &joint_velocities[i], &joint_efforts[i]);
         joint_state_interface.registerHandle(joint_state_handle);
 
-        // hardware_interface::JointHandle joint_handle_position(joint_state_interface.getHandle(joint_names[i]), &joint_positions_command[i]);
-        // position_joint_interface.registerHandle(joint_handle_position);
+        hardware_interface::JointHandle joint_handle_position(joint_state_interface.getHandle(joint_names[i]), &joint_positions_command[i]);
+        position_joint_interface.registerHandle(joint_handle_position);
 
         hardware_interface::JointHandle joint_handle_velocity(joint_state_interface.getHandle(joint_names[i]), &joint_velocities_command[i]);
         velocity_joint_interface.registerHandle(joint_handle_velocity);
@@ -47,7 +47,7 @@ MjHWInterface::MjHWInterface(const std::string &robot)
         effort_joint_interface.registerHandle(joint_handle_effort);
     }
     registerInterface(&joint_state_interface);
-    // registerInterface(&position_joint_interface);
+    registerInterface(&position_joint_interface);
     registerInterface(&velocity_joint_interface);
     registerInterface(&effort_joint_interface);
 }
@@ -78,12 +78,22 @@ void MjHWInterface::write()
         {
             const int joint_id = mj_name2id(m, mjtObj::mjOBJ_JOINT, joint_names[i].c_str());
             const int dof_id = m->jnt_dofadr[joint_id];
-            if (mju_abs(joint_velocities_command[i]) > mjMINVAL)
+            
+            // 優先順位：位置 > 速度 > トルク
+            if (mju_abs(joint_positions_command[i] - joint_positions[i]) > mjMINVAL)
             {
+                // 位置制御: 目標位置に向かう速度を計算して設定
+                double desired_velocity = 50 * (joint_positions_command[i] - joint_positions[i]);
+                MjSim::dq[dof_id] = mju_clip(desired_velocity, -2.0, 2.0); // 速度の制限付き
+            }
+            else if (mju_abs(joint_velocities_command[i]) > mjMINVAL)
+            {
+                // 速度制御
                 MjSim::dq[dof_id] = joint_velocities_command[i];
             }
             else
             {
+                // トルク制御
                 MjSim::ddq[dof_id] = joint_efforts_command[i];
             }
         }
